@@ -1,0 +1,12 @@
+fk/
+xk/
+k419/
+tp8937/
+t_kernel_*/
+dt2/ dt19/ d419/ dcar/
+tmp/
+*.dtb
+*.dtbo
+*.pp
+*.pp.dts
+paths.txt tree.json filelist.txt missing.txt
