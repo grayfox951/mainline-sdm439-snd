@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Only needed if you later decide to fold this driver into the kernel tree.
+# The out-of-tree build in the sibling Makefile uses plain obj-m and ignores
+# this file entirely.
+
+config SND_SOC_AW87329
+	tristate "Awinic AW87329/AW87319 speaker PA (analog input)"
+	depends on I2C
+	depends on REGMAP
+	depends on REGMAP_I2C
+	depends on GPIOLIB
+	depends on REGULATOR_CORE
+	help
+	  Driver for the Awinic AW87329 class-K smart speaker amplifier, and
+	  for the closely related AW87319.
+	
+	  The AW87329 is an analog-input amplifier: the codec's line output
+	  feeds it and it drives the speaker. It carries no I2S/TDM stream, so
+	  this driver registers no DAI link. It exposes an enable and a gain
+	  control instead, which the board's codec SPK PA path is expected to
+	  drive.
+	
+	  If unsure, say N.

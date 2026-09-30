@@ -1,0 +1,70 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * AW87329 speaker PA - corrected device tree node for Redmi 7A (pine).
+ *
+ * Include this from the board .dts, or paste the &blsp1_i2c2 block into it.
+ *
+ * ---------------------------------------------------------------------------
+ * Bus label
+ * ---------------------------------------------------------------------------
+ * The stock node lives under "i2c@78b6000". In this tree (msm8937.dtsi, which
+ * sdm439.dtsi includes) that node is labelled **blsp1_i2c2** - it is QUP2 of
+ * BLSP1, hence "2". It is NOT blsp1_i2c0: in this tree blsp1_i2c0 does not
+ * exist at all (that name only appears in unrelated SoC dtsi files such as
+ * qcs404.dtsi and ipq6018.dtsi). Referencing &blsp1_i2c0 here would be a
+ * compile error, so use &blsp1_i2c2.
+ *
+ * If your tree spells the label differently, check with:
+ *     grep -n "i2c@78b6000" arch/arm64/boot/dts/qcom/msm8937.dtsi
+ *
+ * ---------------------------------------------------------------------------
+ * Changes from the stock node
+ * ---------------------------------------------------------------------------
+ *  1. reset-gpio  ->  reset-gpios
+ *     The stock property is "reset-gpio", singular. That is not a binding
+ *     name: the GPIO bindings define "reset-gpios". A driver using the
+ *     modern descriptor API (devm_gpiod_get_optional(dev, "reset", ...))
+ *     resolves "<con_id>-gpios" and then falls back to the legacy
+ *     "<con_id>-gpio" spelling, so the singular form happens to work, but
+ *     it is unbindable and produces a dt_binding/warning. Renamed here.
+ *
+ *  2. 0x01 -> GPIO_ACTIVE_LOW
+ *     Same meaning, now written with the symbolic name. 0x01 is
+ *     GPIO_ACTIVE_LOW; spelling it out is what the binding asks for.
+ *
+ *  3. status = "okay" on the bus itself
+ *     The bus is "disabled" in msm8937.dtsi and nothing on this board turns
+ *     it on, so the PA would never probe.
+ *
+ * Unchanged from stock, and confirmed on the device: address 0x58, and
+ * tlmm pin 125.
+ *
+ *  4. added a node label, "aw87329"
+ *     Needed by snd/pine-sound.dtsi, whose msm439-snd-card node references the
+ *     amplifier as &aw87329 so snd/msm439-snd-card.c can resolve it with
+ *     of_property_read_phandle() + of_find_device_by_phandle().  A bare
+ *     node name is not referenceable from another file.  Labels are inert, so
+ *     this costs nothing if nothing references it.
+ */
+
+&blsp1_i2c2 {
+	status = "okay";
+
+	aw87329: aw87329@58 {
+		compatible = "awinic,aw87329_pa";
+		reg = <0x58>;
+
+		/* Stock: reset-gpio = <&tlmm 125 0x01> */
+		reset-gpios = <&tlmm 125 GPIO_ACTIVE_LOW>;
+
+		/*
+		 * Optional. The stock DT gives this node no regulator, and
+		 * the driver probes fine without one. Left commented out
+		 * deliberately rather than guessed: inventing a supply here
+		 * would be a guess, and a wrong one can brown out the amp.
+		 * Uncomment only if you have confirmed the rail.
+		 *
+		 * vdd-supply = <&pm8953_l10>;
+		 */
+	};
+};

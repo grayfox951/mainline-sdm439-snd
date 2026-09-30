@@ -29,3 +29,6 @@ gcc.h
 gcc-msm8917.c
 gcc-msm8917.h
 *.ko *.ko.zst
+/aw87329/*.ko
+/clk/*.ko
+/snd/*.ko

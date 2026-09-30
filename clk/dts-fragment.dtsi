@@ -1,0 +1,138 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * dts-fragment.dtsi - AON audio / LPASS clock provider for
+ *                     Xiaomi Redmi 7A (pine), SDM439, msm89x7-mainline/linux
+ *                     @ msm89x7/7.1.3.
+ *
+ * Two parts:
+ *
+ *  1. A new clock provider node. It has NO "reg". The registers it touches
+ *     live inside 0x01800000/0x80000, which drivers/clk/qcom/gcc-msm8917.c
+ *     already owns, so this node must not claim that range. It reaches the
+ *     hardware through a "qcom,gcc" phandle instead, and the driver maps it
+ *     with devm_of_iomap(), which does not call request_mem_region().
+ *
+ *  2. The lpass node's "clocks"/"clock-names", which are the seven names
+ *     lpass-cpu.c and apq8016.c look up by string. This is a drop-in
+ *     replacement for mainline msm8916.dtsi:2073, same clock order, same
+ *     clock-names, same IDs.
+ *
+ * WHY THE IDs ARE LOCAL #defines AND NOT
+ * #include <dt-bindings/clock/qcom,gcc-msm8916.h>
+ * ------------------------------------------------------------------------
+ * arch/arm64/boot/dts/qcom/msm8937.dtsi:7 already includes
+ * dt-bindings/clock/qcom,gcc-msm8917.h. Those two headers disagree on the
+ * VALUE of 119 different macros (JPEG0_CLK_SRC, GCC_MSS_Q6_BIMC_AXI_CLK,
+ * GCC_PDM_AHB_CLK, ... all present in both with different numbers), so
+ * including both in one DT translation unit is a cpp macro-redefinition
+ * error. The numbers below are copied from qcom,gcc-msm8916.h and are
+ * local to this provider node, so nothing collides.
+ *
+ * Apply with:
+ *     dtc -@ ...
+ * or, when building a full DTB:
+ *     cpp -nostdinc -I <kernel>/include -I <kernel>/arch/arm64/include \
+ *         -I <kernel>/include/dts ...
+ * then drop these two hunks into your sdm439-xiaomi-pine audio overlay.
+ *
+ * If you do not want to rebuild the DTB either, see README.md: the same
+ * seven names can be satisfied by the fixed-clock stubs already present in
+ * pine-audio.dts, but only if their frequencies are right - and a bare
+ * fixed-clock makes clk_set_rate() return -EINVAL, which kills both LPASS
+ * drivers.
+ */
+
+/*
+ * Clock IDs, from include/dt-bindings/clock/qcom,gcc-msm8916.h. Meaningful
+ * only against &gcc_sdm439_aon_audio.
+ */
+#ifndef SDM439_AON_AUDIO_AHBFABRIC_IXFABRIC_CLK
+#define SDM439_AON_AUDIO_AHBFABRIC_IXFABRIC_CLK	154
+#define SDM439_AON_AUDIO_PCNOC_MPORT_CLK		150
+#define SDM439_AON_AUDIO_PCNOC_SWAY_CLK		151
+#define SDM439_AON_AUDIO_LPAIF_PRI_I2S_CLK	156
+#define SDM439_AON_AUDIO_LPAIF_SEC_I2S_CLK	157
+#define SDM439_AON_AUDIO_LPAIF_AUX_I2S_CLK	158
+#endif
+
+/ {
+	/*
+	 * Lives outside &soc on purpose: it has no address, and putting an
+	 * address-less node inside an address range invites confusion with
+	 * of_platform resource allocation.
+	 */
+	gcc_sdm439_aon_audio: gcc-sdm439-aon-audio-clocks {
+		compatible = "qcom,gcc-sdm439-aon-audio-clocks";
+		status = "okay";
+
+		/* Seven clock IDs: 150..158 with gaps. See gcc-sdm439-oot.c. */
+		#clock-cells = <1>;
+
+		/*
+		 * The GCC node: reg = <0x01800000 0x80000>, #clock-cells = <1>,
+		 * compatible = "qcom,gcc-msm8937" (msm8937.dtsi:1152). The driver
+		 * of_iomap()s index 0 of this node NON-exclusively. It does NOT
+		 * ask the GCC node for clocks, so there is no recursion into
+		 * drivers/clk/qcom/gcc-msm8917.c at probe time.
+		 */
+		qcom,gcc = <&gcc>;
+
+		/*
+		 * Frequency the provider reports from clk_get_rate() for all
+		 * seven clocks. Purely informational - clk_set_rate() returns 0
+		 * without programming anything, because the LPAIF RCG2s need
+		 * GCC_GPLL1 / GCC_XO_GPLL0_BIMC, neither of which exists in
+		 * gcc-msm8917.c. 133330000 is the msm8916
+		 * GCC_XO_GPLL0_GPLL1_SLEEP rate.
+		 */
+		qcom,aon-audio-hz = <133330000>;
+	};
+};
+
+/* ------------------------------------------------------------------ *
+ * lpass (audio-controller@c008000) - the CPU-side DAI driver
+ * ------------------------------------------------------------------ */
+&lpass {
+	/*
+	 * Identical to mainline msm8916.dtsi:2082, in the same order, with the
+	 * same clock-names, so the seven strings lpass-cpu.c (mi2s-bit-clkN)
+	 * and apq8016.c (ahbix-clk, pcnoc-mport-clk, pcnoc-sway-clk) ask for
+	 * all resolve.
+	 *
+	 * "mi2s-bit-clk0" and "mi2s-bit-clk1" are deliberately the same clock:
+	 * upstream's own comment in msm8916.dtsi says Primary and Secondary MI2S
+	 * both use LPAIF_PRI_I2S_CLK. gcc-sdm439-oot.c returns one struct clk_hw
+	 * for both IDs, so the clk core refcounts one clock, not two.
+	 *
+	 * This replaces the fixed-clock stubs in pine-audio.dts. Those stubs
+	 * make clk_set_rate() return -EINVAL, and apq8016.c:194 and
+	 * lpass-cpu.c:288 both treat a clk_set_rate() failure as fatal.
+	 */
+	clocks = <&gcc_sdm439_aon_audio SDM439_AON_AUDIO_AHBFABRIC_IXFABRIC_CLK>,
+		 <&gcc_sdm439_aon_audio SDM439_AON_AUDIO_LPAIF_PRI_I2S_CLK>,
+		 <&gcc_sdm439_aon_audio SDM439_AON_AUDIO_LPAIF_PRI_I2S_CLK>,
+		 <&gcc_sdm439_aon_audio SDM439_AON_AUDIO_LPAIF_SEC_I2S_CLK>,
+		 <&gcc_sdm439_aon_audio SDM439_AON_AUDIO_LPAIF_AUX_I2S_CLK>,
+		 <&gcc_sdm439_aon_audio SDM439_AON_AUDIO_PCNOC_MPORT_CLK>,
+		 <&gcc_sdm439_aon_audio SDM439_AON_AUDIO_PCNOC_SWAY_CLK>;
+
+	clock-names = "ahbix-clk",
+		      "mi2s-bit-clk0",
+		      "mi2s-bit-clk1",
+		      "mi2s-bit-clk2",
+		      "mi2s-bit-clk3",
+		      "pcnoc-mport-clk",
+		      "pcnoc-sway-clk";
+};
+
+/*
+ * NOT CHANGED HERE: &lpass_codec.
+ *
+ * The fork's lpass_codec node asks &q6afecc for
+ * LPASS_CLK_ID_INTERNAL_DIGITAL_CODEC_CORE. No file under fk/drivers binds
+ * compatible "qcom,q6afe-clocks", so that node is dead weight and lpass_codec
+ * will still fail on its clock lookup. Swapping it for GCC_CODEC_DIGCODEC_CLK
+ * is a separate job: it needs the in-tree gcc-sdm439.c path (whose token is
+ * renumbered to 193, not msm8916's 159 - see qcom,gcc-sdm439.h), or a
+ * digcodec gate added to this module. It is not part of unblocking lpass-cpu.
+ */
