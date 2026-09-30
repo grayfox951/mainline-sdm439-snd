@@ -1,0 +1,261 @@
+/*
+ * Edited by: grayfox951 <admin@dnr.qzz.io>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * dts-fragment.dtsi -- the `lpass` node for Xiaomi Redmi 7A (pine), SDM439,
+ *                      msm89x7-mainline/linux @ msm89x7/7.1.3.
+ *
+ * Driver: lpaif/sdm439-lpaif.c (out of tree). Compatible
+ * "qcom,apq8016-lpass-cpu", same as mainline's msm8916.dtsi lpass node, so
+ * the machine driver in sound/soc/qcom/apq8016_sbc.c and the links in
+ * snd/pine-sound.dtsi do not need changing.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS NODE EXISTS AT ALL
+ * ---------------------------------------------------------------------------
+ * pine's include chain is sdm439-xiaomi-pine.dts -> sdm439.dtsi ->
+ * msm8937.dtsi -> pm8953.dtsi, pmi632.dtsi. msm8937.dtsi has no `lpass` node.
+ * The only `lpass` label in the fork is msm8916.dtsi:557, and pine never
+ * includes msm8916.dtsi. So the node is created here, in the same shape as
+ * msm8916.dtsi:557-581.
+ *
+ * NOTE: if you are ALSO applying clk/dts-fragment.dtsi, its &lpass hunk adds
+ * exactly the same "clocks"/"clock-names" pair that this file already
+ * contains, so applying both is harmless. The clock ID macros below are
+ * byte-identical to the ones in that file and are guarded, so including both
+ * fragments in one translation unit does not redefine anything.
+ *
+ * ---------------------------------------------------------------------------
+ * reg  -- THE ADDRESS IS A PLACEHOLDER. READ THIS BEFORE FLASHING.
+ * ---------------------------------------------------------------------------
+ * The LPAIF register base on SDM439 is NOT KNOWN. It is not in any device
+ * tree in any tree: not in pine's chain, not in msm8916.dtsi, not in
+ * sdm439-audio.dtsi, not in the CAF sdm439-mtp/ctp trees, and not in the
+ * k419 stock vendor tree. Only a speculative value can be written here.
+ *
+ * What IS known, and what it implies:
+ *
+ *   msm8916:  AON base 0x07700000
+ *              LPAIF       AON + 0x08000 = 0x07708000   <- the value below
+ *              sound iomux AON + 0x02000 = 0x07702000
+ *              WCD digital AON + 0x1c000 = 0x0771c000
+ *
+ *   sdm439:   AON base 0x0c000000   (msm8937.dtsi "soc@0" range)
+ *              sound iomux AON + 0x51000 = 0x0c051000   <- verified, sd/pine-sound.dtsi
+ *              WCD digital AON + 0xf0000 = 0x0c0f0000   <- verified, sd/pine-sound.dtsi
+ *
+ * The AON-internal offsets are demonstrably NOT the same on SDM439: the iomux
+ * moved from +0x2000 to +0x51000 and the WCD digital block from +0x1c000 to
+ * +0xf0000. "Same offset inside AON" is therefore a hypothesis, not a
+ * derivation. Two candidates are worth trying, in this order:
+ *
+ *   1.  0x0c008000   = AON + 0x8000, i.e. the msm8916 offset applied to the
+ *                     sdm439 AON base.  This is what snd/pine-sound.dtsi
+ *                     section 3 guesses at, and what its section 6.1 read-only
+ *                     test reads.
+ *   2.  0x0c056000   = AON + 0x56000, i.e. the SDM439 iomux at +0x51000 with
+ *                     the msm8916 0x3000 delta between iomux and LPAIF
+ *                     (+0x2000 -> +0x8000) applied to it. Pure speculation.
+ *
+ * The value written below is the msm8916 one, 0x07708000, deliberately and
+ * visibly WRONG for this SoC, so that nobody flashes a DTB believing it has
+ * been confirmed. Change it before you boot anything.
+ *
+ * ---------------------------------------------------------------------------
+ * A WRONG ADDRESS CAN HANG THE BOARD. KEEP THE DTB ON DISK UNCHANGED.
+ * ---------------------------------------------------------------------------
+ * If `reg` points at the wrong block, the driver's register accesses hit
+ * whatever really lives there. On this SoC that could be a GCC clock
+ * controller register, an SPMI controller register, or a secure-world doorbell.
+ * A write to any of those can wedge the board hard enough that it needs the
+ * power-cycling that a fully dead device requires.
+ *
+ * Therefore:
+ *
+ *   1. NEVER install a candidate DTB as the only copy. Write it to a spare
+ *      dtbo slot or push it with adb and leave the on-disk partition alone:
+ *
+ *          adb push pine-lpaif-test.dtbo /data/local/tmp/
+ *          adb shell su -c 'dd if=/data/local/tmp/pine-lpaif-test.dtbo \
+ *              of=/dev/block/by-name/dtbo_b'
+ *
+ *      so the board still boots the known-good dtbo_a on the next power-up.
+ *
+ *   2. Use probe/safe-write.sh, NOT raw devmem2 writes. It records the uptime
+ *      before and after the write precisely because the expected failure mode
+ *      is that uptime stops advancing.
+ *
+ *   3. Start with `insmod sdm439_lpaif.ko write_en=0`. That makes probe and
+ *      every PCM path write nothing at all, so a wrong `reg` cannot hurt you:
+ *      you still get the base printed in dmesg and you can check it against
+ *      /proc/iomem and devmem2 first.
+ *
+ *   4. Read-only sanity check for a candidate base, 8 words from it. If the
+ *      address is a real, unmapped hole the reads fail or return a constant:
+ *
+ *          devmem2 0x0c008000 32      # expect a plausible LPAIF value
+ *          devmem2 0x0c008004 32      # I2SCTL port 1, must NOT read 0x00000000
+ *                                    # and must NOT read 0xffffffff
+ *          devmem2 0x0c008018 32      # RDMA0 DMACURR, expect ~0
+ *
+ *      probe/read.sh does exactly this for an address you pass it.
+ *
+ * The LPAIF IRQ is the other unknown on the node. GIC_SPI 160 is msm8916's
+ * value. If the LPAIF moves on SDM439 the SPI almost certainly moves with it,
+ * so this is a placeholder too. Get the real number from the stock device
+ * tree:
+ *
+ *      adb shell su -c 'dtc -I fs -O dts /proc/device-tree 2>/dev/null' \
+ *          | grep -A4 -i lpass
+ *
+ * ---------------------------------------------------------------------------
+ * CLOCKS
+ * ---------------------------------------------------------------------------
+ * These seven names are what lpaif/sdm439-lpaif.c asks devm_clk_bulk_get()
+ * for, and they are supplied by clk/gcc-sdm439-oot.c through the
+ * gcc_sdm439_aon_audio provider node in clk/dts-fragment.dtsi. That fragment
+ * must be included too, or this node's clocks never resolve and the driver's
+ * probe defers forever (which is the correct, non-fatal behaviour).
+ *
+ * mi2s-bit-clk0 and mi2s-bit-clk1 point at the same PRI_I2S gate on purpose:
+ * that is what msm8916.dtsi:563-566 does, and gcc-sdm439-oot.c returns one
+ * struct clk_hw for both IDs so the clk core refcounts one clock.
+ *
+ * ---------------------------------------------------------------------------
+ * iommus
+ * ---------------------------------------------------------------------------
+ * The driver defers with -EPROBE_DEFER when this node has no "iommus"
+ * property. Uncomment the line below once you have identified the right SMMU,
+ * or bring the module up with `iommus_required=0` to reproduce what mainline
+ * msm8916.dtsi actually does (its lpass node has no iommus at all, and
+ * neither msm8937.dtsi nor sdm439.dtsi carries dma-mask or dma-ranges
+ * anywhere under &soc).
+ *
+ * The two SMMU nodes that exist on pine are `apps_iommu` (msm8937.dtsi:1700,
+ * msm8937-iommu / msm-iommu-v1) and `adreno_smmu` (sdm439.dtsi:135,
+ * msm8953-iommu / msm-iommu-v2). Neither has been confirmed as the one the
+ * AON/LPAIF DMA goes through, so neither is written here uncommented. Note
+ * that msm8937.dtsi uses apps_iommu secure ids 0x14/0x15/0x16 for other
+ * clients and msm8916.dtsi uses 3/4/5, so the id space differs between trees
+ * and a wrong id is worse than none.
+ *
+ * ---------------------------------------------------------------------------
+ * NO #address-cells / #size-cells, and NO CHILD NODES
+ * ---------------------------------------------------------------------------
+ * This node is a leaf. It creates no child "pcm" platform device, which is the
+ * whole point of the design decision documented at the top of
+ * sdm439-lpaif.c: qcom_snd_parse_of() sets
+ *
+ *	link->platforms->of_node = link->cpus->of_node;
+ *
+ * whenever a link has a "cpu" child and no "platform" child, so the CPU DAI
+ * and the platform component must both live on the device bound to THIS node.
+ * Adding a `platform { sound-dai = <...>; };` child to each dai-link in
+ * sd/pine-sound.dtsi would set link->no_pcm = 1 and turn every link into a
+ * DPCM backend with no frontend to receive playback.
+ *
+ * The machine driver runs links in the order of available children, and
+ * qcom_snd_parse_of() rejects any child that is not a link, so do not put
+ * anything else inside &sound either. snd/pine-sound.dtsi already explains
+ * this at length.
+ */
+
+/*
+ * Clock IDs, from clk/dts-fragment.dtsi, copied here so this fragment is
+ * self-sufficient. Meaningful only against &gcc_sdm439_aon_audio, which has its
+ * own ID space.
+ *
+ * These are local macros and NOT an #include of
+ * <dt-bindings/clock/qcom,gcc-msm8916.h>, because msm8937.dtsi:7 already
+ * includes qcom,gcc-msm8917.h and the two headers declare 119 macros with the
+ * same names and different values. See clk/README.md.
+ */
+#ifndef SDM439_AON_AUDIO_AHBFABRIC_IXFABRIC_CLK
+#define SDM439_AON_AUDIO_AHBFABRIC_IXFABRIC_CLK	154
+#define SDM439_AON_AUDIO_PCNOC_MPORT_CLK		150
+#define SDM439_AON_AUDIO_PCNOC_SWAY_CLK		151
+#define SDM439_AON_AUDIO_LPAIF_PRI_I2S_CLK	156
+#define SDM439_AON_AUDIO_LPAIF_SEC_I2S_CLK	157
+#define SDM439_AON_AUDIO_LPAIF_AUX_I2S_CLK	158
+#endif
+
+&soc {
+	/*
+	 * The label must be `lpass`: snd/pine-sound.dtsi section 3 also defines
+	 * an &lpass node, and its dai-links say sound-dai = <&lpass MI2S_PRIMARY>
+	 * and <&lpass MI2S_TERTIARY>. If you use pine-sound.dtsi, delete or
+	 * comment out its section 3 block and use this one instead; two nodes
+	 * with the same label will not compile.
+	 */
+	lpass: audio-controller@7708000 {
+		status = "okay";
+
+		/*
+		 * Both spellings are accepted, in the same order as
+		 * lpass-apq8016.c's of_device_id. "qcom,apq8016-lpass-cpu" first,
+		 * because that is what mainline msm8916.dtsi:559 uses.
+		 */
+		compatible = "qcom,apq8016-lpass-cpu", "qcom,lpass-cpu-apq8016";
+
+		/* one argument: the MI2S port id, see qcom,lpass.h */
+		#sound-dai-cells = <1>;
+
+		/*
+		 * PLACEHOLDER. See the banner: the SDM439 value is unknown and
+		 * this is msm8916's 0x07708000, deliberately wrong for this SoC.
+		 * Size 0x10000 matches msm8916.dtsi and covers every offset the
+		 * driver addresses (highest +0xd014).
+		 */
+		reg = <0x07708000 0x10000>;
+		reg-names = "lpass-lpaif";
+
+		/*
+		 * PLACEHOLDER. GIC_SPI 160 is msm8916.dtsi:577's value, carried
+		 * over verbatim because nothing better is available. LEVEL_HIGH
+		 * matches both msm8916.dtsi and the IRQ_TRIGGER_RISING this
+		 * driver requests.
+		 *
+		 * To find the real one, dump the stock device tree and look for
+		 * the lpaif/lpass node:
+		 *     adb shell su -c 'dtc -I fs -O dts /proc/device-tree' \
+		 *         | grep -B4 -A8 -i 'lpaif\|lpass'
+		 */
+		interrupts = <0 160 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "lpass-irq-lpaif";
+
+		clocks = <&gcc_sdm439_aon_audio SDM439_AON_AUDIO_AHBFABRIC_IXFABRIC_CLK>,
+			 <&gcc_sdm439_aon_audio SDM439_AON_AUDIO_LPAIF_PRI_I2S_CLK>,
+			 <&gcc_sdm439_aon_audio SDM439_AON_AUDIO_LPAIF_PRI_I2S_CLK>,
+			 <&gcc_sdm439_aon_audio SDM439_AON_AUDIO_LPAIF_SEC_I2S_CLK>,
+			 <&gcc_sdm439_aon_audio SDM439_AON_AUDIO_LPAIF_AUX_I2S_CLK>,
+			 <&gcc_sdm439_aon_audio SDM439_AON_AUDIO_PCNOC_MPORT_CLK>,
+			 <&gcc_sdm439_aon_audio SDM439_AON_AUDIO_PCNOC_SWAY_CLK>;
+
+		/*
+		 * Positional, and it must be this exact order for clk/dts-fragment.dtsi
+		 * and this file to agree. devm_clk_bulk_get() matches by name, so
+		 * the order is documentation rather than ABI, but keeping them
+		 * identical makes the DT readable.
+		 */
+		clock-names = "ahbix-clk",
+			      "mi2s-bit-clk0",
+			      "mi2s-bit-clk1",
+			      "mi2s-bit-clk2",
+			      "mi2s-bit-clk3",
+			      "pcnoc-mport-clk",
+			      "pcnoc-sway-clk";
+
+		/*
+		 * Required by the driver unless it is loaded with
+		 * iommus_required=0. NOT written here, because the SMMU for the
+		 * AON/LPAIF DMA has not been identified on this board. See the
+		 * iommus section of the banner.
+		 *
+		 * iommus = <&apps_iommu 0>;
+		 */
+	};
+};

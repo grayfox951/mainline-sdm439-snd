@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Only needed if you later decide to fold this driver into the kernel tree.
+# The out-of-tree build in the sibling Makefile uses plain obj-m and ignores
+# this file entirely; see README.md for the exact make command.
+#
+# The driver deliberately does NOT select SND_SOC_LPASS or
+# SND_SOC_APQ8016_SBC. It provides the same CPU DAI by itself, and the
+# in-tree pair must not be loaded at the same time.
+
+config SND_SOC_SDM439_LPAIF
+	tristate "SDM439 LPAIF CPU DAI / PCM platform (Redmi 7A, pine)"
+	depends on SND_SOC
+	depends on COMMON_CLK
+	depends on REGMAP
+	depends on HAS_IOMEM
+	depends on INTERRUPT_DOMAIN
+	help
+	  Out-of-tree ALSA SoC CPU DAI for the SDM439 Low Power Audio Interface
+	  (LPAIF), the same block the upstream lpass-cpu.c / lpass-apq8016.c /
+	  lpass-platform.c trio drives on apq8016 and msm8916.
+
+	  It exists because the SDM439 LPAIF base address appears in no device
+	  tree in any tree, so in-tree code cannot be fixed without rebuilding
+	  the kernel, whereas a DT "reg" property can be edited and a new DTB
+	  flashed in seconds. It registers the CPU DAI and the ASoC platform
+	  component on the DT node labelled `lpass`, which is what
+	  sound/soc/qcom/apq8016_sbc.c's qcom_snd_parse_of() expects.
+
+	  Registering the DAI requires: one MMIO region named "lpass-lpaif",
+	  the seven clock names ahbix-clk, mi2s-bit-clk0..3, pcnoc-mport-clk
+	  and pcnoc-sway-clk, an interrupt named "lpass-irq-lpaif", and an
+	  "iommus" property. Missing clocks defer the probe with
+	  -EPROBE_DEFER. Missing iommus defers it too, unless the
+	  iommus_required=0 module parameter is given.
+
+	  It must not be built in alongside the in-tree lpass modules; they
+	  match the same compatibles and the same DT node.
+
+	  This driver has NOT been compiled. See README.md.
+
+	  If unsure, say N.
