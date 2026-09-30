@@ -1,3 +1,9 @@
+/*
+ * Edited by: grayfox951 <admin@dnr.qzz.io>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
 // SPDX-License-Identifier: GPL-2.0
 /*
  * AW87329 speaker PA - corrected device tree node for Redmi 7A (pine).
@@ -40,8 +46,8 @@
  * tlmm pin 125.
  *
  *  4. added a node label, "aw87329"
- *     Needed by snd/pine-sound.dtsi, whose msm439-snd-card node references the
- *     amplifier as &aw87329 so snd/msm439-snd-card.c can resolve it with
+ *     Needed by snd/pine-sound.dtsi, whose sdm439-snd-card node references the
+ *     amplifier as &aw87329 so snd/sdm439-snd-card.c can resolve it with
  *     of_property_read_phandle() + of_find_device_by_phandle().  A bare
  *     node name is not referenceable from another file.  Labels are inert, so
  *     this costs nothing if nothing references it.

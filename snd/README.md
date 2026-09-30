@@ -4,7 +4,7 @@ Target kernel: `msm89x7-mainline/linux` @ `msm89x7/7.1.3`, arm64.
 
 | File | What it is |
 |---|---|
-| `snd/msm439-snd-card.c` | Speaker-amplifier supervisor. **Not** an ASoC machine driver — see §1. |
+| `snd/sdm439-snd-card.c` | Speaker-amplifier supervisor. **Not** an ASoC machine driver — see §1. |
 | `snd/pine-sound.dtsi` | The whole sound section: WCD analog codec, LPASS, WCD digital codec, sound card, amp-supervisor node. |
 | `snd/README.md` | This file. |
 
@@ -135,7 +135,7 @@ grep -c 'set_fmt\|master_capable\|slave_capable' \
 grep -n 'dai-format' sound/soc/qcom/common.c  # no output
 ```
 
-### 1b. What `msm439-snd-card.c` actually is
+### 1b. What `sdm439-snd-card.c` actually is
 
 One board-specific gap has no in-tree home: **the speaker amplifier**.
 
@@ -148,9 +148,9 @@ path, and the only hook that fires at exactly the right moment is
 `sound/soc/codecs/msm8916-wcd-analog.c` — an in-tree file an out-of-tree
 module cannot patch.
 
-`msm439-snd-card.c` supplies only that missing coupling:
+`sdm439-snd-card.c` supplies only that missing coupling:
 
-* binds a plain platform device `qcom,msm439-snd-card` (no DAI, no codec, no
+* binds a plain platform device `qcom,sdm439-snd-card` (no DAI, no codec, no
   AFE reference);
 * finds the amplifier through a DT phandle (`amp-phandle = <&aw87329>`) using
   `of_property_read_phandle()` + `of_find_device_by_phandle()` — the AW87329
@@ -158,7 +158,7 @@ module cannot patch.
 * calls `aw87329_spk_enable()` / `aw87329_spk_disable()`, resolved with
   `__symbol_get()` so there is no link-time dependency and the module builds,
   loads and unloads with or without `aw87329.ko`;
-* exports `msm439_spk_amp_enable()` / `msm439_spk_amp_disable()` so a future
+* exports `sdm439_spk_amp_enable()` / `sdm439_spk_amp_disable()` so a future
   in-tree patch to `pm8916_wcd_analog_enable_spk_pa()` can call them from
   `SND_SOC_DAPM_POST_PMU` / `SND_SOC_DAPM_POST_PMD` and get the ordering right;
 * exposes `spk_amp_enable` in sysfs for use until that patch exists.
@@ -169,7 +169,7 @@ It duplicates nothing: the AW87329 register protocol lives only in `aw87329.c`.
 its node `aw87329: aw87329@58`, because `pine-sound.dtsi` references it as
 `&aw87329`. A bare node name is not referenceable from another dtsi. Labels are
 inert, so this costs nothing if nothing refers to it. **If that fragment is not
-included, `pine-sound.dtsi` will not compile** — the `msm439_snd_card` node and
+included, `pine-sound.dtsi` will not compile** — the `sdm439_snd_card` node and
 its `amp-phandle` are the only thing that depends on it, so dropping §6 of the
 dtsi along with the fragment is the alternative.
 
@@ -220,7 +220,7 @@ for_each_available_child_of_node(dev->of_node, np) { /* make a dai_link */ }
 **Every child node of `&sound` that is not `status = "disabled"` becomes a
 dai_link.** Each needs `link-name`, a `cpu` node with `sound-dai`, and a `codec`
 (or `platform`) node. Adding a `widgets` node, an amplifier node or anything
-else inside `&sound` breaks the card. That is why `msm439_snd_card` is a
+else inside `&sound` breaks the card. That is why `sdm439_snd_card` is a
 sibling of `&sound` under `&soc`.
 
 The properties it *does* parse are: `model` (with `qcom,model` as a fallback),
@@ -263,7 +263,7 @@ done
 
 * **`SPK_OUT`** — a codec `SND_SOC_DAPM_OUTPUT` with no codec-side sink. The
   AW87329 is fed from it but carries no I2S; modelling it as a card widget or a
-  DAI would be wrong. It is driven from `msm439-snd-card.c` instead (§1b).
+  DAI would be wrong. It is driven from `sdm439-snd-card.c` instead (§1b).
 * **`HPH_L` / `HPH_R` / `EAR`** — no upstream msm8916 board in this kernel
   routes the headphone or earpiece jack; the WCD's own `hphl`/`hphr` MUX and
   its MBHC state machine do it. Adding routes would only add unverified paths.
@@ -542,7 +542,7 @@ modprobe snd-soc-apq8016
 # 5. Speaker amplifier and its supervisor (out-of-tree, order-independent;
 #    the supervisor retries the lookup if the amplifier probed later)
 modprobe aw87329
-modprobe msm439_snd_card
+modprobe sdm439_snd_card
 ```
 
 Or, for a normal boot, via `/etc/modules`:
@@ -556,7 +556,7 @@ snd-soc-msm8916-digital
 snd-soc-wcd-mbhc
 snd-soc-apq8016
 aw87329
-msm439_snd_card
+sdm439_snd_card
 ```
 
 ### Expected log markers, in order
@@ -584,16 +584,16 @@ aplay /usr/share/sounds/alsa/Front_Center.wav            # playback
 
 The correct order matters: enable the amp **after** the codec's SPK path is up,
 disable it **before** the path goes down, or the speaker thumps. Until
-`pm8916_wcd_analog_enable_spk_pa()` calls into `msm439-snd-card.c`, drive it by
+`pm8916_wcd_analog_enable_spk_pa()` calls into `sdm439-snd-card.c`, drive it by
 hand:
 
 ```sh
 AMP=$(ls -d /sys/bus/i2c/devices/*aw87329* | head -1)   # the aw87329 device
 
 # before playback
-echo 1 > /sys/devices/platform/*msm439-snd-card*/spk_amp_enable
+echo 1 > /sys/devices/platform/*sdm439-snd-card*/spk_amp_enable
 aplay /usr/share/sounds/alsa/Front_Center.wav
-echo 0 > /sys/devices/platform/*msm439-snd-card*/spk_amp_enable
+echo 0 > /sys/devices/platform/*sdm439-snd-card*/spk_amp_enable
 
 # or use the amplifier's own sysfs switch, which is what
 # aw87329/README.md documents:
@@ -601,8 +601,8 @@ echo 1 > "$AMP/enable"
 ```
 
 Once `pm8916_wcd_analog_enable_spk_pa()` is patched in-tree
-(`SND_SOC_DAPM_POST_PMU → msm439_spk_amp_enable()`,
-`SND_SOC_DAPM_POST_PMD → msm439_spk_amp_disable()`) the sequencing is automatic
+(`SND_SOC_DAPM_POST_PMU → sdm439_spk_amp_enable()`,
+`SND_SOC_DAPM_POST_PMD → sdm439_spk_amp_disable()`) the sequencing is automatic
 and the sysfs writes must be dropped — they would double-drive the amplifier.
 
 ---
@@ -681,7 +681,7 @@ See §5.
 | Item | State |
 |---|---|
 | Machine driver | **`apq8016_sbc.c` reusable as-is**, no variant |
-| `msm439-snd-card.c` | amp supervisor only; not an ASoC machine driver |
+| `sdm439-snd-card.c` | amp supervisor only; not an ASoC machine driver |
 | `wcd_codec` node | complete: 14 IRQs, mainline supply names, MBHC thresholds |
 | `&lpass` node | complete except base address + IRQ (**hypotheses**) |
 | `&lpass_codec` node | `ahbix-clk` verified; `mclk` **placeholder** |

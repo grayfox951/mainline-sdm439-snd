@@ -1,3 +1,9 @@
+/*
+ * Edited by: grayfox951 <admin@dnr.qzz.io>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
 // SPDX-License-Identifier: BSD-3-Clause
 /*
  * Sound card for Xiaomi Redmi 7A (pine) / SDM439
@@ -6,7 +12,7 @@
  *
  * Machine driver:  sound/soc/qcom/apq8016_sbc.c
  *                    compatible = "qcom,apq8016-sbc-sndcard"
- *                  NO variant of it is needed. See snd/msm439-snd-card.c.
+ *                  NO variant of it is needed. See snd/sdm439-snd-card.c.
  *
  * Codecs used:
  *                  &wcd_codec     qcom,pm8916-wcd-analog-codec  @ SPMI 0xf000
@@ -403,7 +409,7 @@
  * at the top of section 7 - every non-disabled child of &sound becomes a
  * dai_link, so nothing else may live there.
  *
- * This node exists only so snd/msm439-snd-card.c has something to bind to
+ * This node exists only so snd/sdm439-snd-card.c has something to bind to
  * and a phandle to the amplifier.  It is a plain platform device; it carries
  * no DAI, no codec and no AFE reference.
  *
@@ -417,8 +423,8 @@
  * ======================================================================= */
 
 &soc {
-	msm439_snd_card: msm439-snd-card {
-		compatible = "qcom,msm439-snd-card";
+	sdm439_snd_card: sdm439-snd-card {
+		compatible = "qcom,sdm439-snd-card";
 		status = "okay";
 
 		/*
@@ -476,7 +482,7 @@
  *   - "SPK_OUT".  It is a codec OUTPUT widget with no codec-side sink.  The
  *     AW87329 is an analog-input amplifier fed from SPK_OUT; modelling it as
  *     a card widget or a DAI would be wrong (it carries no I2S).  It is
- *     driven from sysfs instead - see snd/msm439-snd-card.c.
+ *     driven from sysfs instead - see snd/sdm439-snd-card.c.
  *   - "HPH_L"/"HPH_R"/"EAR".  No upstream msm8916 board in this kernel routes
  *     the headphone or earpiece jack; the WCD's own hphl/hphr MUX plus its
  *     MBHC state machine do it.  Inventing routes here would only add

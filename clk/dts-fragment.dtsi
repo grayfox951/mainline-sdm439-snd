@@ -1,3 +1,9 @@
+/*
+ * Edited by: grayfox951 <admin@dnr.qzz.io>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
 // SPDX-License-Identifier: BSD-3-Clause
 /*
  * dts-fragment.dtsi - AON audio / LPASS clock provider for

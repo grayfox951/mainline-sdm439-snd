@@ -1,66 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * gcc-sdm439-oot.c - out-of-tree AON audio / LPASS clock provider for
- *                     Xiaomi Redmi 7A (pine), SDM439, msm89x7-mainline/linux
- *                     @ msm89x7/7.1.3.
- *
- * WHAT THIS IS FOR
- * ----------------
- * drivers/clk/qcom/gcc-msm8917.c (the driver bound to this board's
- * "qcom,gcc-msm8937" node) contains zero occurrences of the string ULTAUDIO,
- * and include/dt-bindings/clock/qcom,gcc-msm8917.h contains none of the
- * GCC_ULTAUDIO_* tokens. Therefore the seven clocks that
- *
- *     sound/soc/qcom/lpass-cpu.c   (devm_clk_get(), "mi2s-bit-clkN")
- *     sound/soc/qcom/apq8016.c    (devm_clk_get() / devm_clk_bulk_get(),
- *                                  "ahbix-clk", "pcnoc-mport-clk",
- *                                  "pcnoc-sway-clk")
- *
- * ask for by name can never resolve, and both drivers defer with
- * -EPROBE_DEFER forever. That is the single blocker to audio on this board.
- *
- * The equivalent clocks DO exist in drivers/clk/qcom/gcc-msm8916.c, as plain
- * CBCR gate branches inside the AON region of the GCC, and the register
- * offsets hold on this board: the GCC node is clock-controller@1800000 in
- * both msm8916.dtsi and msm8937.dtsi, and a live read of 0x181c004
- * (GCC + 0x1c004, gcc_ultaudio_pcnoc_sway_clk) returned 0x20008001 with
- * bit 0 already set.
- *
- * WHY A SEPARATE PROVIDER INSTEAD OF REPLACING THE IN-TREE DRIVER
- * --------------------------------------------------------------
- * The kernel may not be rebuilt. drivers/clk/qcom/gcc-msm8917.c is built in
- * and owns the whole GCC window (reg = <0x01800000 0x80000>) via
- * request_mem_region(). This module therefore does NOT register a second
- * device claiming that window and does NOT re-register the other 114 GCC
- * clocks. It:
- *
- *   1. Maps the GCC window NON-EXCLUSIVELY with devm_of_iomap(), which goes
- *      through devm_ioremap() and never calls request_mem_region(). There is
- *      no bindmap variant of devm_platform_ioremap_resource() in this tree
- *      (verified: "ioremap_resource_bindmap" returns zero hits anywhere under
- *      fk/include), so a resource-owned mapping is impossible here and is not
- *      used.
- *   2. Builds its own regmap over that mapping with devm_regmap_init_mmio().
- *   3. Registers exactly six hardware gates (seven DT clock IDs -
- *      mi2s-bit-clk0 and mi2s-bit-clk1 are the same LPAIF PRI clock, exactly
- *      as in mainline msm8916.dtsi) behind its own DT node, with its own ID
- *      space.
- *
- * The DT node carries NO reg at all. It refers to the GCC node through a
- * "qcom,gcc" phandle. So there is no overlapping address space anywhere:
- * of_platform_populate() hands this driver zero resources.
- *
- * CLOCK OPERATIONS ARE REAL, NOT NO-OPS
- * ------------------------------------
- * Each clock writes/clears BIT(0) of its CBCR on enable/disable, i.e. the
- * same hardware operation drivers/clk/qcom/gcc-msm8916.c performs for the
- * same clocks. See README.md for why, and for what it costs.
- *
- * This provider does NOT touch the LPAIF bit-clock RCG2s (CMD_RCGR at
- * 0x1c054 / 0x1c06c / 0x1c084). Their parents need GCC_GPLL1 and
- * GCC_XO_GPLL0_BIMC, and gcc-msm8917.c has no GPLL1, no GPLL0_BIMC vote and
- * no sleep_clk - confirmed by grep. Those rates therefore stay as whatever
- * the bootloader programmed them to. See README.md, "what you will not get".
+ * Edited by: grayfox951 <admin@dnr.qzz.io>
  */
 
 #include <dt-bindings/clock/qcom,gcc-msm8916.h>
