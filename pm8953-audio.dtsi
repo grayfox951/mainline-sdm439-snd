@@ -1,0 +1,184 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * WCD analog codec (PM8953) for Xiaomi Redmi 7A (pine) / SDM439
+ * =============================================================
+ * THIS NODE IS MISSING FROM THE msm89x7 FORK. The fork's own
+ * msm8937-qdsp6.dtsi references &wcd_codec twice and never defines it, so
+ * that file cannot compile. This node is the replacement, and every value
+ * below is taken from the stock tree, not guessed:
+ *
+ *   MiCode/Xiaomi_Kernel_OpenSource @ pine-p-oss
+ *   arch/arm64/boot/dts/qcom/sdm439-audio.dtsi  lines 87-152
+ *
+ * THE SPEAKER IS IN HERE. There is no external amplifier driver to write.
+ * Stock has no Awinic node anywhere in the audio dtsi and it explicitly sets
+ *
+ *       qcom,wsa-disabled;                      (sdm439-audio.dtsi:24)
+ *
+ * i.e. no Wireless Speaker Amplifier. The WCD codec drives the speaker
+ * itself, and the driver already in the fork handles it - verified inside
+ * sound/soc/codecs/msm8916-wcd-analog.c:
+ *
+ *       line 949  SND_SOC_DAPM_MIXER("SPK DAC", ... spkr_switch ...)
+ *       line 951  comment marking the Speaker section
+ *       line 952  SND_SOC_DAPM_OUTPUT("SPK_OUT")
+ *       line 953  SND_SOC_DAPM_PGA_E("SPK PA", CDC_A_SPKR_DRV_CTL, 6, 0, ...
+ *                                pm8916_wcd_analog_enable_spk_pa, ...)
+ *       line 940  SND_SOC_DAPM_PGA_E("HPHR PA", CDC_A_RX_HPH_CNP_EN, ...)
+ *       ...       SND_SOC_DAPM_PGA_E("HPHL PA", ...)
+ *       ...       SND_SOC_DAPM_SUPPLY("MIC_BIAS1", CDC_A_MICB_1_EN, 7, 0, ...)
+ *       ...       SND_SOC_DAPM_SUPPLY("MIC_BIAS2", CDC_A_MICB_2_EN, 7, 0, ...)
+ *       ...       SND_SOC_DAPM_SUPPLY("MIC BIAS Internal1/2/3", ...)
+ *
+ * So the SAME driver gives you: speaker, headphones, headset mic, main mic,
+ * secondary mic. That is the whole analog path, and it is already in the tree.
+ *
+ * NOTE ON THE COMPATIBLE: msm8916-wcd-analog.c has exactly one entry in its
+ * of_match_table, "qcom,pm8916-wcd-analog-codec". The stock string
+ * "qcom,pmic-analog-codec" is a CAF driver binding and means nothing here.
+ */
+
+&pmic1 {
+	status = "okay";
+
+	/*
+	 * stock sdm439-audio.dtsi:91 - 0x200 bytes, not 0x400.
+	 * The digital codec inside it is at 0xc0f0000 (line 150), which
+	 * independently confirms the fork's lpass_codec reg of 0x0c0f0000.
+	 */
+	wcd_codec: analog-codec@f000 {
+		compatible = "qcom,pm8916-wcd-analog-codec";
+		reg = <0xf000 0x200>;
+		#sound-dai-cells = <1>;
+		#address-cells = <2>;
+		#size-cells = <0>;
+
+		/*
+		 * stock lines 95-122. 14 sources, and the names matter because
+		 * MBHC wires its work to them. Note that three of them are the
+		 * speaker protection signals, which is the proof that the WCD
+		 * owns the PA:
+		 *   spk_cnp_int  spk_clip_int  spk_ocp_int
+		 * and four more are the headphone protection signals:
+		 *   ear_ocp_int  hphr_ocp_int  hphl_ocp_det  ...
+		 */
+		/*
+		 * No interrupt-parent. The msm89x7 fork's own spmi-pmic children
+		 * in pm8953.dtsi omit it, e.g.
+		 *     interrupts = <0x00 0x08 0 IRQ_TYPE_EDGE_BOTH>;
+		 *     interrupts = <0x0  0x61 0x1 IRQ_TYPE_EDGE_RISING>;
+		 * which is <usid, offset, index, flags> - the same 4-cell shape
+		 * stock uses here, so the line below is byte-for-byte stock's.
+		 */
+		interrupts = <0x1 0xf0 0x0 IRQ_TYPE_NONE>,
+			     <0x1 0xf0 0x1 IRQ_TYPE_NONE>,
+			     <0x1 0xf0 0x2 IRQ_TYPE_NONE>,
+			     <0x1 0xf0 0x3 IRQ_TYPE_NONE>,
+			     <0x1 0xf0 0x4 IRQ_TYPE_NONE>,
+			     <0x1 0xf0 0x5 IRQ_TYPE_NONE>,
+			     <0x1 0xf0 0x6 IRQ_TYPE_NONE>,
+			     <0x1 0xf0 0x7 IRQ_TYPE_NONE>,
+			     <0x1 0xf1 0x0 IRQ_TYPE_NONE>,
+			     <0x1 0xf1 0x1 IRQ_TYPE_NONE>,
+			     <0x1 0xf1 0x2 IRQ_TYPE_NONE>,
+			     <0x1 0xf1 0x3 IRQ_TYPE_NONE>,
+			     <0x1 0xf1 0x4 IRQ_TYPE_NONE>,
+			     <0x1 0xf1 0x5 IRQ_TYPE_NONE>;
+		interrupt-names = "spk_cnp_int",
+				  "spk_clip_int",
+				  "spk_ocp_int",
+				  "ins_rem_det1",
+				  "but_rel_det",
+				  "but_press_det",
+				  "ins_rem_det",
+				  "mbhc_int",
+				  "ear_ocp_int",
+				  "hphr_ocp_int",
+				  "hphl_ocp_det",
+				  "ear_cnp_int",
+				  "hphr_cnp_int",
+				  "hphl_cnp_int";
+
+		/* stock lines 124-138 */
+		cdc-vdda-cp-supply = <&pm8953_s4>;
+		qcom,cdc-vdda-cp-voltage = <1900000 2050000>;
+		qcom,cdc-vdda-cp-current = <500000>;
+
+		cdc-vdd-io-supply = <&pm8953_l5>;
+		qcom,cdc-vdd-io-voltage = <1800000 1800000>;
+		qcom,cdc-vdd-io-current = <5000>;
+
+		/* this is the rail that powers the built-in speaker PA */
+		cdc-vdd-pa-supply = <&pm8953_s4>;
+		qcom,cdc-vdd-pa-voltage = <1900000 2050000>;
+		qcom,cdc-vdd-pa-current = <260000>;
+
+		cdc-vdd-mic-bias-supply = <&pm8953_l13>;
+		qcom,cdc-vdd-mic-bias-voltage = <3075000 3075000>;
+		qcom,cdc-vdd-mic-bias-current = <5000>;
+
+		/* stock line 140 */
+		qcom,cdc-mclk-clk-rate = <9600000>;
+
+		/*
+		 * MBHC button handling. stock msm8937-audio.dtsi:
+		 *   qcom,msm-mbhc-hphl-swh = <1>     headset detect on
+		 *   qcom,msm-mbhc-gnd-swh = <0>      ground switch off
+		 *   qcom,msm-hs-micbias-type = "internal"
+		 *   qcom,msm-micbias1-ext-cap
+		 * The mainline driver reads these as "hs-mic-mute" style DT
+		 * bools instead; see the note in lpass-audio.dtsi.
+		 */
+
+		/*
+		 * The digital half. The fork already has this at
+		 * lpass_codec @ 0x0c0f0000, and stock agrees (line 150), so do
+		 * NOT add a second copy of it here.
+		 */
+
+		sound-dai = <0>;
+		status = "okay";
+	};
+};
+
+/* ------------------------------------------------------------------ *
+ * MCLK to the codec
+ *
+ * Stock has two MCLK sources and I am listing both so you can see the
+ * choice, not so you enable both.
+ *
+ * sdm439-audio.dtsi:27-37  clock_audio_native
+ *      qcom,audio-ref-clk-gpio = <&tlmm 66 0>       <-- APQ8016 path MCLK
+ *      qcom,lpass-mclk-id = "pri_mclk"
+ *      pinctrl cdc_mclk2_active / cdc_mclk2_sleep
+ *
+ * sdm439-audio.dtsi:41-46  clock_audio
+ *      qcom,audio-ref-clk-gpio = <&pm8953_gpios 1 0>  <-- WCD9335 / "tasha"
+ *      pinctrl tasha_mclk_default
+ *
+ * This board has no WCD9335 (that is the 9335 dtsi), so for the msm8916
+ * wcd-analog path the APQ8016 one is the relevant one: TLMM 66, active high,
+ * function of which is decided by the pinctrl you pair with it.
+ *
+ * THIS IS OPTIONAL and left disabled on purpose: lpass-apq8016.c can supply
+ * the codec MCLK from GCC_ULTAUDIO clocks, and the ref-clk GPIO route is the
+ * CAF way. Turn it on only if the codec probe complains about a missing MCLK.
+ * ------------------------------------------------------------------ */
+&tlmm {
+	cdc_mclk2_active: cdc-mclk2-active {
+		cdc-pdm-line1-pins {
+			pins = "gpio66";
+			function = "cdc_pdm0";
+			drive-strength = <2>;
+			bias-disable;
+		};
+	};
+	cdc_mclk2_sleep: cdc-mclk2-sleep {
+		cdc-pdm-line1-pins {
+			pins = "gpio66";
+			function = "gpio";
+			drive-strength = <2>;
+			input-high;
+		};
+	};
+};

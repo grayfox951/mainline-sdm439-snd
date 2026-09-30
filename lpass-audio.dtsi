@@ -1,0 +1,273 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * LPASS + sound card for Xiaomi Redmi 7A (pine) / SDM439
+ * ======================================================
+ * THIS IS THE ANALOG AUDIO PATH. It does not need the QDSP6 AFE, and
+ * therefore it works on this kernel today.
+ *
+ * Why analog-only:
+ *   sound/soa/qcom/  (q6apm, the QDSP6 firmware loader)  -> 404 in the fork
+ *                                                        -> 404 in upstream v7.1
+ *   sound/soc/msm/   (msm-afe, msm8x2q dsp ops)          -> 404 in the fork
+ *                                                        -> 404 in upstream v7.1
+ *   q6asmdai.c / q6afedai.c / q6routing.c / q6voicedai.c -> not in sound/soc/qcom
+ * None of that has ever been ported to mainline for any SoC, so the digital
+ * path (PDM mic, voice, DSP effects) is simply not available. The analog path
+ * needs none of it.
+ *
+ * What the analog path gives you:
+ *   - headphone / line out via the WCD analog codec
+ *   - jack detect and headset plug/unplug events via wcd-mbhc-v2
+ *   - the analog microphones: main mic, secondary mic, headset mic
+ *
+ * What it cannot give you, and why:
+ *   - digital PDM microphone: needs the AFE (cdc_pdm0 feeds the DSP)
+ *   - speaker: the external Awinic amplifier has no driver anywhere
+ *   - voice calls / DSP processing: needs the AFE and matching firmware
+ *
+ * MACHINE DRIVER CHOICE - this is the part that was wrong before.
+ * The fork's sound node says:
+ *     compatible = "qcom,msm8916-qdsp6-sndcard";
+ * That variant (msm8916_qdsp6_add_ops) sets card->components = "qdsp6" and
+ * forces 48 kHz / 2ch / S16_LE on every prelink, because it expects the
+ * QDSP6 AFE DAIs. Those DAIs do not exist here, so the card would sit there
+ * deferring forever.
+ *
+ * The correct one for LPASS/PCM is:
+ *     compatible = "qcom,apq8016-sbc-sndcard";
+ * apq8016_sbc_add_ops does not force the QDSP6 component, and the driver
+ * builds every dai link itself from its own template - the DT does NOT need
+ * to list any dai-link. It only needs the four iomux regions, which the
+ * fork's sound node already has:
+ *     reg-names = "mic-iomux", "spkr-iomux", "pri-iomux", "quin-iomux";
+ *
+ * NOTE: apq8016_sbc.c writes those iomux registers directly in
+ * apq8016_dai_init() (SPKR_CTL_PRI_WS_SLAVE_SEL_11 for MI2S_PRIMARY and so
+ * on), so the node's reg MUST stay exactly as the fork defines it.
+ */
+
+/* ------------------------------------------------------------------ *
+ * LPASS - the CPU-side DAI driver
+ *
+ * THE SEARCH I ACTUALLY DID, so you can trust the conclusion:
+ *
+ *  1. msm89x7 fork  (67 778 files, whole tree enumerated)
+ *         -> no lpass node anywhere in msm8937.dtsi
+ *  2. upstream torvalds/linux v7.1
+ *         -> no lpass node for any 8x2q part
+ *  3. MiCode/Xiaomi_Kernel_OpenSource @ pine-p-oss
+ *         -> full partial clone, 60 920 files, ALL of arch/arm64/boot/dts
+ *            checked out and grepped
+ *         -> the ONLY lpaif node in the entire tree is
+ *                msm8916.dtsi:481   lpass: lpass@07708000
+ *         -> msm8937.dtsi:1604 and msm8953.dtsi:2014 both declare
+ *            "qcom,lpass@c200000", but that node is
+ *                compatible = "qcom,pil-tz-generic";
+ *                reg = <0xc200000 0x00100>;
+ *                interrupts = <GIC_SPI 293 IRQ_TYPE_EDGE_RISING>;
+ *                firmware-name = "adsp";
+ *            i.e. it is the ADSP remoteproc, NOT the LPAIF I/O registers.
+ *            The name is a CAF misnomer.
+ *         -> sound/soc/qcom/lpass-lpaif-reg.h and lpass.h contain only
+ *            register OFFSETS, no base address.
+ *
+ * CONCLUSION: the pine-p-oss tree was already mainline-converted and lost
+ * the CAF C constant that held the LPAIF base. Nobody has working mainline
+ * audio for sdm439. The stock tree has no WCD codec driver either -
+ * sound/soc/codecs there contains no msm8916-wcd-analog.c at all.
+ *
+ * WHAT I PUT IN AND WHY
+ * ---------------------
+ * The value below is a HYPOTHESIS, not a verified fact, and it is marked
+ * as such in the DT so nobody mistakes it for ground truth.
+ *
+ * Reasoning: on msm8916 the AON/ADSP base is 0x07700000 and LPAIF sits at
+ * 0x07708000, i.e. AON_base + 0x8000. sdm439's AON base is 0x0c000000
+ * (its other audio blocks are in that range: sound iomux 0x0c051000,
+ * WCD digital 0x0c0f0000, avtimer 0x0c0a300c), which would put LPAIF at
+ * 0x0c008000.
+ *
+ * The argument against it: sdm439's internal AON offsets clearly do NOT
+ * match msm8916's. msm8916 has sound iomux at AON+0x2000, sdm439 has it at
+ * AON+0x51000; msm8916 has WCD digital 0x14000 above LPAIF, sdm439 has it
+ * 0x9F000 above. So "same offset inside AON" is not a safe assumption.
+ *
+ * HOW TO TEST IT SAFELY - wrong address does not damage anything here.
+ * The lpass node is a read-mostly register window; probing it wrong just
+ * makes the probe fail or return zeros. Check after booting:
+ *
+ *     dmesg | grep -i lpass
+ *     # then poke the two registers that must be non-zero-ish at boot:
+ *     devmem2 0x0c00918 32     # LPAIF_I2SCTL for port 0, expect sane bits
+ *
+ * A node that probes and hands the driver a live I2S controller shows a
+ * non-zero I2SCTL with the reset bits clear. All-ones or all-zeros means
+ * wrong base; try 0x0c057000 next (sound iomux + 0x6000, the msm8916
+ * delta) and report which one probes.
+ * ------------------------------------------------------------------ */
+/* sound, lpass_codec and the whole AON block live in &soc (msm8937.dtsi:612,
+ * `soc: soc@0`), so this node goes there too - not in a made-up &aon_blk. */
+&soc {
+	lpass: audio-controller@c008000 {
+		status = "okay";
+
+		/* both spellings are accepted by lpass-apq8016.c */
+		compatible = "qcom,apq8016-lpass-cpu", "qcom,lpass-cpu-apq8016";
+
+		/* the token header msm8937.dtsi:13 already pulled in */
+		#include <dt-bindings/sound/qcom,q6dsp-lpass-ports.h>
+
+		/*
+		 * Clock order matters - clock-names is positional. This is the
+		 * msm8916 order from the stock tree, all seven confirmed present
+		 * in the fork's include/dt-bindings/clock/qcom,gcc-msm8916.h.
+		 * NOTE: mi2s-bit-clk0 and mi2s-bit-clk1 are deliberately the
+		 * SAME PRI_I2S_CLK. Not a typo.
+		 */
+		/*
+		 * #clock-cells = <2> on q6afecc: <id, attribute>. These are the
+		 * seven LPAIF clocks lpass-cpu.c asks for by name. LPASS_AUDIO_CORE
+		 * ids are the LPAIF bit clocks; the macro vote ones are the
+		 * AHB fabric and the two pcnoc ports.
+		 */
+		/* DIAGNOSTIC: fixed-clock stubs, see the note in pine-audio.dts */
+		clocks = <&lpass_stub_ahbix>, <&lpass_stub_mport>,
+			 <&lpass_stub_sway>,  <&lpass_stub_mi2s0>,
+			 <&lpass_stub_mi2s1>, <&lpass_stub_mi2s2>,
+			 <&lpass_stub_mi2s3>;
+		clock-names = "ahbix-clk",
+			      "pcnoc-mport-clk",
+			      "pcnoc-sway-clk",
+			      "mi2s-bit-clk0",
+			      "mi2s-bit-clk1",
+			      "mi2s-bit-clk2",
+			      "mi2s-bit-clk3";
+
+		/* HYPOTHESIS - see the note above. msm8916 uses GIC_SPI 160. */
+		interrupts = <GIC_SPI 160 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "lpass-irq-lpaif";
+
+		/* HYPOTHESIS - see the note above. msm8916 uses 0x10000 too. */
+		reg = <0x0c008000 0x10000>;
+		reg-names = "lpass-lpaif";
+
+		#sound-dai-cells = <1>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+	};
+};
+
+/* ------------------------------------------------------------------ *
+ * WCD digital codec - the LPASS DAI on the codec side
+ *
+ * CLOCKS ARE REPLACED HERE, ON PURPOSE.
+ * The fork's own msm8937.dtsi:2353 drives this node from a different
+ * provider:
+ *     clocks       = <&q6afecc LPASS_CLK_ID_INTERNAL_DIGITAL_CODEC_CORE
+ *                              LPASS_CLK_ATTRIBUTE_COUPLE_NO>, <&rpmcc ...>;
+ *     clock-names  = "mclk", "ahbix-clk";
+ *     assigned-clocks = <&q6afecc ...>;
+ * i.e. it expects the AFE-style clock controller. If those LPASS_CLK_ID_*
+ * tokens are not implemented in this fork's gcc-msm8917.c, the clock
+ * framework rejects the names and the node never probes.
+ *
+ * mainline msm8916.dtsi:2108 drives the same block from plain GCC clocks,
+ * and all of those are confirmed present in the fork's
+ * include/dt-bindings/clock/qcom,gcc-msm8916.h. So use those and drop the
+ * q6afecc dependency entirely. Nothing else changes about this node.
+ * ------------------------------------------------------------------ */
+&lpass_codec {
+	/*
+	 * KEPT AS THE FORK SHIPS IT. Do not "fix" this to GCC_ULTAUDIO_*.
+	 *
+	 * I tried that and it cannot work: the chain includes
+	 * dt-bindings/clock/qcom,gcc-msm8917.h (msm8937.dtsi:7), NOT
+	 * gcc-msm8916.h, and gcc-msm8917.h has 114 GCC_* tokens with zero
+	 * ULTAUDIO / LPAIF / CODEC_DIGCODEC ones. drivers/clk/qcom/gcc-msm8917.c
+	 * has zero occurrences of the string ULTAUDIO. The GCC_ULTAUDIO_* family
+	 * only exists in qcom,gcc-msm8909.h / 8939 / 8916, none of which is
+	 * reachable from this board.
+	 *
+	 * The tokens the fork uses are real and resolvable: LPASS_CLK_ID_* and
+	 * LPASS_CLK_ATTRIBUTE_COUPLE_NO are defined in
+	 * include/dt-bindings/sound/qcom,q6dsp-lpass-ports.h, which
+	 * msm8937.dtsi:13 already includes.
+	 *
+	 * OPEN QUESTION I could not close: no file under include/ binds
+	 * compatible "qcom,q6afe-clocks", so whether a clock driver actually
+	 * implements ID 50 for the q6afecc node is unverified. If lpass_codec
+	 * fails to probe with a clock error, this is the reason, and the fix is
+	 * a new clock driver, not a DT change.
+	 */
+
+	/*
+	 * reg 0x0c0f0000 is CONFIRMED twice, independently:
+	 *   stock sdm439-audio.dtsi:150   msm_digital_codec reg 0xc0f0000
+	 *   stock msm8937-audio.dtsi      same 0x0c0f0000 cluster
+	 * so this node's address is right and does not need guessing.
+	 */
+	status = "okay";
+};
+
+/* ------------------------------------------------------------------ *
+ * Sound card
+ *
+ * The fork ships "qcom,msm8916-qdsp6-sndcard". That variant calls
+ * msm8916_qdsp6_add_ops(), which sets card->components = "qdsp6" and pins
+ * every prelink to 48 kHz / 2ch / S16_LE. It exists for the QDSP6 AFE
+ * DAIs - which are NOT in this kernel (no sound/soa/qcom, no
+ * sound/soc/msm, in the fork AND in upstream v7.1). The card would sit
+ * deferring forever.
+ *
+ * "qcom,apq8016-sbc-sndcard" is the LPASS/PCM variant and works with what
+ * is actually present. apq8016_sbc_add_ops() adds nothing AFE-specific.
+ *
+ * The four iomux regions stay exactly as the fork defines them. The driver
+ * maps them by reg-name, not by index:
+ *     mic-iomux    required   -> 0x0c051000
+ *     spkr-iomux   required   -> 0x0c051004
+ *     quin-iomux   optional   -> 0x0c052000   (absent => -ENOENT on
+ *                                                 MI2S_QUINARY only)
+ *     pri-iomux    unused by the driver, harmless
+ * apq8016_sbc_platform_probe() reads them with
+ * devm_platform_ioremap_resource_byname() and returns -EINVAL if mic-iomux
+ * or spkr-iomux is missing, so do not trim the reg list.
+ * ------------------------------------------------------------------ */
+&sound {
+	compatible = "qcom,apq8016-sbc-sndcard";
+	status = "okay";
+
+	/*
+	 * qcom_snd_parse_of() in sound/soc/qcom/common.c reads this. It is what
+	 * makes the codec's DAPM graph get driven - without a routing table
+	 * the SPK/HP/MIC paths stay disconnected and the card is silent even
+	 * when it registers successfully.
+	 *
+	 * These are the widget names that actually exist in
+	 * sound/soc/codecs/msm8916-wcd-analog.c, plus the two the machine
+	 * driver registers itself via snd_soc_card_jack_new_pins():
+	 *     "Headphone Jack"  and  "Mic Jack"   (SND_JACK_HEADSET)
+	 *
+	 * STOCK sdm439-audio.dtsi:41-46 and msm8937-audio.dtsi:60+ use exactly
+	 * this set, and stock also sets
+	 *     qcom,msm-mbhc-hphl-swh = <1>
+	 *     qcom,msm-mbhc-gnd-swh  = <0>
+	 *     qcom,msm-hs-micbias-type = "internal"
+	 * The mainline driver reads these as plain bools instead, which is why
+	 * they are written here as hs-mic-mute / micbias type rather than as
+	 * the qcom,msm-mbhc-* properties the CAF driver expects.
+	 */
+	qcom,audio-routing =
+		"RX_BIAS", "MCLK2",
+		"Headphone Jack", "HPHR", "HPHR PA", "HPHR DAC", "HPHR Mixer",
+		"HPHL", "HPHL PA", "HPHL DAC", "HPHL Mixer",
+		"SPK_OUT", "SPK PA", "SPK DAC",
+		"Mic Jack", "MicJack2",
+		"ADC1", "ADC2", "ADC3",
+		"Handset Mic", "Handset Mic Mixer", "Handset Mic PGA",
+		"Headset Mic", "Headset Mic Mixer", "Headset Mic PGA",
+		"Secondary Mic", "Secondary Mic Mixer", "Secondary Mic PGA";
+
+	/* stock msm8937-audio.dtsi:50 */
+	qcom,msm-mclk-freq = <9600000>;
+};

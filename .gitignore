@@ -1,0 +1,31 @@
+# partial clones and checkouts - not part of the work
+fk/
+xk/
+k419/
+tp8937/
+tp/
+dt/
+dt2/
+dt19/
+d419/
+dcar/
+dev/
+probe_out/
+t_*/
+tmp/
+vendor/
+*.dtb
+*.dtbo
+*.pp
+*.pp.dts
+paths.txt
+tree.json
+filelist.txt
+missing.txt
+safe.dts
+back.dts
+codec.c
+gcc.h
+gcc-msm8917.c
+gcc-msm8917.h
+*.ko *.ko.zst

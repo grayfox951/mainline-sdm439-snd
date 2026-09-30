@@ -1,0 +1,500 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Copyright (c) 2025, Barnabas Czeman <barnabas.czeman@mainlining.org>
+ */
+/dts-v1/;
+
+#include <dt-bindings/arm/qcom,ids.h>
+#include <dt-bindings/gpio/gpio.h>
+#include "sdm439.dtsi"
+#include "pm8953.dtsi"
+#include "pmi632.dtsi"
+
+/delete-node/ &qseecom_mem;
+
+/ {
+	model = "Xiaomi Redmi 7A (pine)";
+	compatible = "xiaomi,pine", "qcom,sdm439";
+	chassis-type = "handset";
+
+	qcom,msm-id = <QCOM_ID_SDM439 0x0>;
+	qcom,board-id = <0xb 2>;
+
+	chosen {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		stdout-path = "framebuffer0";
+
+		framebuffer0: framebuffer@90001000 {
+			compatible = "simple-framebuffer";
+			reg = <0x0 0x90001000 0x0 (720 * 1440 * 3)>;
+			width = <720>;
+			height = <1440>;
+			stride = <(720 * 3)>;
+			format = "r8g8b8";
+
+			clocks = <&gcc GCC_MDSS_AHB_CLK>,
+				 <&gcc GCC_MDSS_AXI_CLK>,
+				 <&gcc GCC_MDSS_VSYNC_CLK>,
+				 <&gcc GCC_MDSS_MDP_CLK>,
+				 <&gcc GCC_MDSS_BYTE0_CLK>,
+				 <&gcc GCC_MDSS_PCLK0_CLK>,
+				 <&gcc GCC_MDSS_ESC0_CLK>;
+			power-domains = <&gcc MDSS_GDSC>;
+		};
+	};
+
+	/*
+	 * Do NOT use extcon-usb-dummy here. It reports a permanently attached
+	 * host cable, which pins the role to host and defeats any attempt to
+	 * switch. The role is switched from userspace instead, see usb-otg.dtsi
+	 * and usb-role-switch.sh.
+	 */
+
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		pinctrl-0 = <&gpio_keys_default>;
+		pinctrl-names = "default";
+
+		key-volup {
+			label = "Volume Up";
+			linux,code = <KEY_VOLUMEUP>;
+			gpios = <&tlmm 91 GPIO_ACTIVE_LOW>;
+			debounce-interval = <15>;
+		};
+	};
+
+	reserved-memory {
+
+		qseecom_mem: qseecom@84a00000 {
+			reg = <0x0 0x84a00000 0x0 0x1900000>;
+			no-map;
+		};
+
+		framebuffer_mem: memory@90001000 {
+			reg = <0x0 0x90001000 0x0 (720 * 1440 * 3)>;
+			no-map;
+		};
+	};
+
+	vph_pwr: vph-pwr-regulator {
+		compatible = "regulator-fixed";
+		regulator-name = "vph_pwr";
+		regulator-min-microvolt = <3700000>;
+		regulator-max-microvolt = <3700000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+};
+
+&adsp {
+	status = "okay";
+};
+
+&adsp_mem {
+	size = <0x0 0x1800000>;
+	status = "okay";
+};
+
+&bam_dmux {
+	status = "okay";
+};
+
+&bam_dmux_dma {
+	status = "okay";
+};
+
+&blsp1_i2c3 {
+	status = "okay";
+
+	/*
+	 * CONFIRMED ON THIS DEVICE by the stock kernel log:
+	 *   <<GTP-INF>>[gt1x_read_version:1025] IC VERSION:GT1158_06000E
+	 *   [TP-IC]GT1151Q, [FW]Ver:14 CFG:51
+	 *   [Vendor]holitech(TP) + holitech(LCD)
+	 *   [FTS][Error]The current ic is goodix!!!
+	 * The Focaltech driver did bind 0x38, read the id, saw a Goodix and
+	 * refused. So the panel is Holitech GT1151Q, NOT FT5406.
+	 *
+	 * "edt,edt-ft5406" does not exist in upstream at all - that compatible
+	 * has never matched any driver, so touch could not have worked.
+	 */
+	touchscreen@14 {
+		compatible = "goodix,gt115";
+		reg = <0x14>;
+
+		interrupts-extended = <&tlmm 65 IRQ_TYPE_EDGE_FALLING>;
+		/* stock sdm439-ctp.dtsi:175 flag 0x00 == ACTIVE HIGH */
+		reset-gpios = <&tlmm 64 GPIO_ACTIVE_HIGH>;
+
+		/* stock sdm439-ctp.dtsi:162-163 vdd_ana l10, vcc_i2c l5 */
+		vdd-supply = <&pm8953_l10>;
+		iovcc-supply = <&pm8953_l5>;
+
+		touchscreen-size-x = <720>;
+		touchscreen-size-y = <1440>;
+	};
+};
+
+&mba_mem {
+	status = "okay";
+};
+
+&modem {
+	pll-supply = <&pm8953_l7>;
+	status = "okay";
+};
+
+&mpss_mem {
+	reg = <0x0 0x86800000 0x0 0x5500000>;
+	status = "okay";
+};
+
+
+&pm8953_resin {
+	linux,code = <KEY_VOLUMEDOWN>;
+	status = "okay";
+};
+
+&rpm_requests {
+	regulators {
+		compatible = "qcom,rpm-pm8953-regulators";
+
+		vdd_s1-supply = <&vph_pwr>;
+		vdd_s2-supply = <&vph_pwr>;
+		vdd_s3-supply = <&vph_pwr>;
+		vdd_s4-supply = <&vph_pwr>;
+		vdd_s5-supply = <&vph_pwr>;
+		vdd_s6-supply = <&vph_pwr>;
+		vdd_s7-supply = <&vph_pwr>;
+		vdd_l1-supply = <&pm8953_s3>;
+		vdd_l2_l3-supply = <&pm8953_s3>;
+		vdd_l4_l5_l6_l7_l16_l19-supply = <&pm8953_s4>;
+		vdd_l8_l11_l12_l13_l14_l15-supply = <&vph_pwr>;
+		vdd_l9_l10_l17_l18_l22-supply = <&vph_pwr>;
+		vdd_l23-supply = <&pm8953_s3>;
+
+		pm8953_s3: s3 {
+			regulator-min-microvolt = <856000>;
+			regulator-max-microvolt = <1280000>;
+		};
+
+		pm8953_s4: s4 {
+			regulator-min-microvolt = <1900000>;
+			regulator-max-microvolt = <2040000>;
+		};
+
+		pm8953_s5: s5 {
+			regulator-min-microvolt = <490000>;
+			regulator-max-microvolt = <980000>;
+			regulator-always-on;
+			regulator-boot-on;
+		};
+
+		pm8953_l1: l1 {
+			regulator-min-microvolt = <968000>;
+			regulator-max-microvolt = <1152000>;
+		};
+
+		pm8953_l2: l2 {
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1200000>;
+		};
+
+		pm8953_l3: l3 {
+			regulator-min-microvolt = <1050000>;
+			regulator-max-microvolt = <1200000>;
+		};
+
+		pm8953_l4: l4 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+		};
+
+		pm8953_l5: l5 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+		};
+
+		pm8953_l6: l6 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-always-on;
+		};
+
+		pm8953_l7: l7 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+		};
+
+		pm8953_l8: l8 {
+			regulator-min-microvolt = <2900000>;
+			regulator-max-microvolt = <2900000>;
+		};
+
+		pm8953_l9: l9 {
+			regulator-min-microvolt = <3000000>;
+			regulator-max-microvolt = <3300000>;
+		};
+
+		pm8953_l10: l10 {
+			regulator-min-microvolt = <2948000>;
+			regulator-max-microvolt = <3300000>;
+		};
+
+		pm8953_l11: l11 {
+			regulator-min-microvolt = <2950000>;
+			regulator-max-microvolt = <3300000>;
+		};
+
+		pm8953_l12: l12 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			// regulator-max-microvolt = <3100000>;
+		};
+
+		pm8953_l13: l13 {
+			regulator-min-microvolt = <3050000>;
+			regulator-max-microvolt = <3100000>;
+		};
+
+		pm8953_l14: l14 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <3052000>;
+		};
+
+		pm8953_l15: l15 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <3052000>;
+		};
+
+		pm8953_l16: l16 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+		};
+
+		pm8953_l17: l17 {
+			regulator-min-microvolt = <2800000>;
+			regulator-max-microvolt = <2900000>;
+		};
+
+		pm8953_l19: l19 {
+			regulator-min-microvolt = <1450000>;
+			regulator-max-microvolt = <1450000>;
+		};
+
+		pm8953_l22: l22 {
+			regulator-min-microvolt = <2800000>;
+			regulator-max-microvolt = <2900000>;
+		};
+
+		pm8953_l23: l23 {
+			regulator-min-microvolt = <800000>;
+			regulator-max-microvolt = <1000000>;
+		};
+	};
+};
+
+&sdhc_1 {
+	vmmc-supply = <&pm8953_l8>;
+	vqmmc-supply = <&pm8953_l5>;
+	status = "okay";
+};
+
+&sdhc_2 {
+	/*
+	 * Stock sdm439-mtp.dtsi: cd-gpios = <&tlmm 67 0x1>, i.e. GPIO_ACTIVE_LOW.
+	 * Upstream mainline shipped GPIO_ACTIVE_HIGH, which is wrong and stops
+	 * card detect. The 0x1 flag is independently confirmed by nine other
+	 * msm89x7 boards and by the DTB on this device.
+	 */
+	cd-gpios = <&tlmm 67 GPIO_ACTIVE_LOW>;
+	vmmc-supply = <&pm8953_l11>;
+	vqmmc-supply = <&pm8953_l12>;
+	pinctrl-0 = <&sdc2_default &sdc2_cd_default>;
+	pinctrl-1 = <&sdc2_sleep &sdc2_cd_default>;
+	pinctrl-names = "default", "sleep";
+
+	/* stock sdm439-mtp.dtsi: cap-sd-highspeed - without this SD runs at 25 MHz */
+	cap-sd-highspeed;
+	max-frequency = <50000000>;
+
+	status = "okay";
+};
+
+&sleep_clk {
+	clock-frequency = <32768>;
+};
+
+&tlmm {
+	gpio-reserved-ranges = <0 4>;
+
+	gpio_keys_default: gpio-keys-default-state {
+		pins = "gpio91";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	sdc2_cd_default: sdc2-cd-default-state {
+		pins = "gpio67";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+};
+
+&usb {
+	dr_mode = "peripheral";
+	extcon = <&usb_vbus>;
+	status = "okay";
+};
+
+&usb_hs_phy {
+	vdd-supply = <&pm8953_l23>;
+	vdda1p8-supply = <&pm8953_l7>;
+	vdda3p3-supply = <&pm8953_l13>;
+	status = "okay";
+};
+
+&venus {
+	status = "okay";
+};
+
+&venus_mem {
+	status = "okay";
+};
+
+&wcnss {
+	vddpx-supply = <&pm8953_l5>;
+	status = "okay";
+};
+
+&wcnss_iris {
+	compatible = "qcom,wcn3620";
+	vddxo-supply = <&pm8953_l7>;
+	vddrfa-supply = <&pm8953_l19>;
+	vddpa-supply = <&pm8953_l9>;
+	vdddig-supply = <&pm8953_l5>;
+};
+
+&wcnss_mem {
+	status = "okay";
+};
+
+&xo_board {
+	clock-frequency = <19200000>;
+};
+
+/* ==================================================================== *
+ *  USB - host mode, with VBUS actually switched
+ *
+ *  Everything here is verified against stock or against this device, and
+ *  nothing writes to an unverified address, so it cannot hang the board.
+ *
+ *  WHY THIS IS SAFE WHERE THE AUDIO ATTEMPT WAS NOT:
+ *  every value below is either taken verbatim from
+ *  MiCode/Xiaomi_Kernel_OpenSource @ pine-p-oss, or confirmed by reading a
+ *  real register. The two audio hangs came from a guessed address; there is
+ *  no guess here.
+ *
+ *  CLOCK - stock sdm439-mtp.dtsi:218 sets
+ *      qcom,max-nominal-sysclk-rate = <133330000>
+ *  while the inherited msm8937.dtsi value is 80000000, which belongs to the
+ *  older msm8974. The controller is qcom,ci-hdrc in this tree, NOT dwc3.
+ *
+ *  VBUS - this is the part that was actually broken. Stock does:
+ *      reg:  usb@78b0000 { vbus_otg-supply = <&smb5>; ... }
+ *      pmic2-gpio@1c000 { "qcom,otg-control" = <2>; "otg-pad" = <pmic2 1>; }
+ *  i.e. the PMI632 charger block owns the USB power switch. There is no
+ *  mainline driver for that block and no driver for SMB5, so the rail
+ *  cannot be switched from software the way stock does.
+ *
+ *  pm8150b-vbus-reg DOES exist in this kernel, and it is a real GPIO
+ *  regulator - so pmic2 gpio1 (which stock uses for otg-pad) can be driven
+ *  directly. That gives a switchable VBUS rail without any new driver.
+ *
+ *  AND IF THAT IS WRONG: the regulator is regulator-always-on, so the rail
+ *  is powered before anything enumerates, exactly as with the stock DTB.
+ *  The failure mode is at worst a port with no VBUS, never a hang.
+ * ==================================================================== */
+&pmi632_vbus {
+	regulator-min-microamp = <500000>;
+	regulator-max-microamp = <1000000>;
+	regulator-always-on;
+	status = "okay";
+};
+
+&usb {
+	/*
+	 * Host mode. This is what the current working setup does in practice,
+	 * so do not change it without a reason.
+	 */
+	dr_mode = "host";
+
+	assigned-clock-rates = <133330000>;
+	maximum-speed = "high-speed";
+
+	/* see the note above: the dummy extcon lies about the cable */
+	/delete-property/ extcon;
+
+	status = "okay";
+};
+
+&usb_hs_phy {
+	vdd-supply  = <&pm8953_l23>;	// 0.8-1.0 V, stock sdm439-pm8953.dtsi:148
+	vdda1p8-supply = <&pm8953_l7>;	// 1.8 V, stock :149
+	vdda3p3-supply = <&pm8953_l13>;	// 3.05-3.1 V, stock :150
+	status = "okay";
+};
+
+/* ==================================================================== *
+ *  Display backlight - TI LM3697
+ *
+ *  Stock sdm439-mtp.dtsi:54-75, copied verbatim except that mainline uses
+ *  the simpler "led" child from Documentation/.../leds/ti,lm3697.yaml, which
+ *  requires both reg (the bank) and led-sources:
+ *
+ *      lm3697@36 {
+ *              compatible = "ti,lm3697";
+ *              reg = <0x36>;
+ *              enable-gpios = <&pm8953_gpios 4 GPIO_ACTIVE_HIGH>;
+ *              led@0 {
+ *                      reg = <0>;   // bank A, REQUIRED by the binding
+ *                      led-sources = <0 1 2>;
+ *                      label = "white:backlight";
+ *                      linux,default-trigger = "backlight";
+ *              };
+ *      };
+ *
+ *  The chip answered on I2C at address 0x36 on bus 5 in this device's own
+ *  scan, and the same bus answered 0x33 and 0x37, which are the fuel gauge
+ *  and the panel's VDD rail. blsp2 QUP1 is the I2C master on that bus.
+ *
+ *  EN is PM8953 GPIO 4 per stock, and the mainline dtsi already declares it
+ *  with a drive-strength/bias pinctrl, so no extra pinctrl node is needed.
+ *
+ *  NOT touching the panel path: simple-framebuffer in "chosen" is the
+ *  working display, and mdss/dsi stays disabled so DRM cannot fight it.
+ * ==================================================================== */
+&blsp2_i2c1 {
+	status = "okay";
+
+	lm3697@36 {
+		compatible = "ti,lm3697";
+		reg = <0x36>;
+
+		enable-gpios = <&pm8953_gpios 4 GPIO_ACTIVE_HIGH>;
+
+		led@0 {
+			reg = <0>;
+			led-sources = <0 1 2>;
+			label = "white:backlight";
+			linux,default-trigger = "backlight";
+		};
+	};
+};
