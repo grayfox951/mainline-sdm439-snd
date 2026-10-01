@@ -4,9 +4,13 @@
 # Built on the mainline Linux PC, deployed to the phone over SSH/SCP.
 # No ADB anywhere - the phone runs a full Linux mainline system.
 #
-# No kernel rebuild is required: CONFIG_MODVERSIONS is off in 7.1.3-msm89x7,
-# so an out-of-tree module only needs `make modules_prepare` to have been run
-# once in the kernel tree.
+# THIS SCRIPT BUILDS MODULES ONLY. IT NEVER BUILDS A KERNEL.
+# It produces exactly three .ko files and copies them to the phone.
+#
+# A module cannot be compiled without the kernel's generated headers existing
+# in the tree. If include/generated/autoconf.h is missing the script stops and
+# prints the single command to run ONCE ON A BIG MACHINE (not the phone).
+# That command generates headers only - it does not produce a kernel image.
 #
 # SPDX-License-Identifier: GPL-2.0
 #
@@ -39,8 +43,16 @@ need() { command -v "$1" >/dev/null 2>&1 || die "нет команды: $1"; }
 echo "=== проверки ==="
 [ -d "$KERNEL_SRC" ] || die "нет дерева ядра: $KERNEL_SRC"
 [ -f "$KERNEL_SRC/Makefile" ] || die "это не дерево ядра: $KERNEL_SRC"
-[ -f "$KERNEL_SRC/include/generated/autoconf.h" ] \
-  || die "не выполнен make modules_prepare в дереве ядра"
+[ -f "$KERNEL_SRC/include/generated/autoconf.h" ] || {
+  echo
+  echo "В дереве ядра нет сгенерированных заголовков."
+  echo "Выполни ОДИН РАЗ на большой машине (НЕ на телефоне):"
+  echo
+  echo "  make -C \"$KERNEL_SRC\" ARCH=$ARCH CROSS_COMPILE=$CROSS modules_prepare"
+  echo
+  echo "Это только генерация заголовков, ядро не собирается."
+  exit 1
+}
 need "${CROSS}gcc"
 need ssh
 need scp
@@ -56,9 +68,6 @@ echo "    MODVERSIONS: $modv  $([ "$modv" = 0 ] && echo '(ок, пересбор
 free_m=$(awk '/MemAvailable/{print $2}' /proc/meminfo 2>/dev/null || echo 0)
 echo "    свободно RAM: $((free_m / 1024)) MB   (потоков: $JOBS)"
 [ "$free_m" -lt 600000 ] && echo "    ВНИМАНИЕ: мало памяти, уменьши JOBS" >&2
-
-# Если kernel ещё не подготовлен, один раз выполни (низкопотоково!):
-#   make -C "$KERNEL_SRC" ARCH=arm64 CROSS_COMPILE="$CROSS" -j"$JOBS" modules_prepare
 
 # ---- build, in dependency order -----------------------------------------
 # clk first: the LPAIF DAI hard-fails on the 7 AON audio clocks.
