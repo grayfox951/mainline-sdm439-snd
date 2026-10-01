@@ -55,7 +55,7 @@ echo "    MODVERSIONS: $modv  $([ "$modv" = 0 ] && echo '(ок, пересбор
 # проверка памяти перед сборкой - телефон уже ребутался от нехватки RAM
 free_m=$(awk '/MemAvailable/{print $2}' /proc/meminfo 2>/dev/null || echo 0)
 echo "    свободно RAM: $((free_m / 1024)) MB   (потоков: $JOBS)"
-[ "$free_m" -lt 600000 ] && echo "    ВНИМАНИЕ: мало памяти, уменьши JOBS" >&2"
+[ "$free_m" -lt 600000 ] && echo "    ВНИМАНИЕ: мало памяти, уменьши JOBS" >&2
 
 # Если kernel ещё не подготовлен, один раз выполни (низкопотоково!):
 #   make -C "$KERNEL_SRC" ARCH=arm64 CROSS_COMPILE="$CROSS" -j"$JOBS" modules_prepare
