@@ -210,7 +210,14 @@
 		 * Size 0x10000 matches msm8916.dtsi and covers every offset the
 		 * driver addresses (highest +0xd014).
 		 */
-		reg = <0x07708000 0x10000>;
+		/*
+		 * iommus omitted on purpose. CAF uses iommus = <&apps_smmu 0x1821 0x0>
+		 * (msm-audio-lpass.dtsi:389) but that label lives in a Qualcomm base
+		 * dtsi which is not in any public tree, so referencing it here would
+		 * not resolve. mainline msm8916.dtsi also omits iommus from its lpass
+		 * node entirely. Load the module with iommus_required=0 to match.
+		 */
+		reg = <0x0c0dc000 0x10000>;
 		reg-names = "lpass-lpaif";
 
 		/*
@@ -255,7 +262,6 @@
 		 * AON/LPAIF DMA has not been identified on this board. See the
 		 * iommus section of the banner.
 		 *
-		 * iommus = <&apps_iommu 0>;
 		 */
 	};
 };
